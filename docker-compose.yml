@@ -1,0 +1,119 @@
+version: "3.7"
+
+services:
+
+  elasticsearch:
+    environment:
+      discovery.type: single-node
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.4.1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"    
+      - "9300:9300"  
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]      
+
+  cerebro:
+    image: lmenezes/cerebro
+    ports:
+      - "9000:9000"
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]      
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.4.1
+    ports:
+      - "5601:5601"
+    environment:
+      SERVER_NAME: kibana
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+    # healthcheck:
+      # test: wget -qO- http://localhost:5601 > /dev/null
+      # interval: 30s
+      # retries: 3
+
+  logstash:
+    hostname: logstash
+    command: sh -c "logstash -e 'input { syslog  { type => syslog port => 10514   } gelf { } } output { stdout { codec => rubydebug } elasticsearch { hosts => [ \"elasticsearch\" ] } }'"
+    image: logstash:alpine
+    ports:
+        - "10514:10514/tcp"
+        - "10514:10514/udp"
+        - "12201:12201/udp"
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+
+  apm-server:
+    image: afonsoaugusto/apm-server
+    hostname: apm-server
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports: 
+      - 8200:8200
+    depends_on:
+      - elasticsearch
+      - kibana
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+
+  api-uuid:
+    image: afonsoaugusto/api-uuid
+    environment:
+      ELASTIC_APM_SERVICE_NAME: api-uuid
+      ELASTIC_APM_SERVER_URL: http://apm-server:8200
+    ports: 
+      - 8080:8080
+    depends_on:
+      - apm-server
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+
+  # metricbeat:
+    # image: afonsoaugusto/metricbeat-mongodb
+    # environment:
+      # MONGODB_URL: mongodb://mongo:27017
+      # ELASTICSEARCH_URL: http://elasticsearch:9200
+      # KIBANA_URL: http://kibana:5601
+    # depends_on:
+      # - elasticsearch
+      # - kibana
+    # networks:
+      # - elk
+    # deploy:
+      # mode: replicated
+      # replicas: 1
+
+volumes:
+  elasticsearch-data:
+
+
+networks:
+  elk:
+    # driver: bridge
+    # driver_opts:
+      # encrypted: "true"
